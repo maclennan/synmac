@@ -1,0 +1,1292 @@
+\documentclass[12pt]{article}
+%\usepackage{amssymb}
+\usepackage{amsbsy}
+\usepackage{graphicx}
+\usepackage{listings}
+\voffset=-0.7in
+\setlength{\textwidth}{6.0in}
+\setlength{\textheight}{8.5in}
+%\setlength{\footskip}{0.8in}
+% correct bad hyphenation here
+%
+\begin{document}
+\def\Version{7}
+\def\Tilde{\symbol{126}}%
+\def\obrace{\pmb{\{}}
+\def\cbrace{\pmb{\}}}
+\newcommand{\word}[1]{{\bf #1}}
+\newcommand{\nterm}[1]{\langle\mbox{#1}\rangle}
+\def\nl{\nterm{newline}}
+%
+% \Section{tag}{title}
+%
+\newcommand{\Section}[2]{
+\section{#2}
+\label{sec:#1}
+}
+%
+% \Subsection{title}
+%
+\newcommand{\Subsection}[1]{
+\subsection{#1}
+\label{sec:#1}
+}
+%
+% \Subsectiont{tag}{title}
+%
+\newcommand{\Subsectiont}[2]{
+\subsection{#2}
+\label{sec:#1}
+}
+%
+% \Subsubsection{title}
+%
+\newcommand{\Subsubsection}[1]{
+\subsubsection{#1}
+\label{sec:#1}
+}
+%
+% \neqn{tag}{eqn} -- numbered equation
+%
+\newcommand{\neqn}[2]{\begin{equation}\label{eq:#1}
+#2
+\end{equation}}
+%
+% \Future{text}
+%
+\newcommand{\Future}[1]{
+\begin{quote}
+\emph{Idea:} #1
+\end{quote}}
+%
+% \Alt syntax\\ syntax\\ ... syntax\\ syntax \Endalt - declare alternative syntax
+%
+\def\Alt{\left\{ \begin{array}{l}}
+\def\Endalt{\end{array} \right\}}
+%%%%%%%%%%%
+\lstdefinelanguage{synmac}
+	{morekeywords={syntax,means,endsyntax,
+	include,trim,endtrim,expand,endexpand,dedent,
+	alpha,quotes,superquote,flag,set,
+	pattern,endpattern,
+	},
+	morestring=[b]",
+	stringstyle=\ttfamily,
+	showstringspaces=false}
+\lstdefinelanguage{func}
+	{morekeywords={
+	def,as,declare,
+	},
+	morestring=[b]",
+	stringstyle=\ttfamily,
+	showstringspaces=false}
+\lstset{language=synmac}
+%%%%%%%%%%%%%
+\title{
+The Synmac Syntax Macroprocessor\\
+Introduction and Manual
+\\[.2in]
+{\large Version \Version}
+}
+\author{Bruce J. MacLennan%
+\footnote{
+This report may be used for any non-profit
+purpose provided that the source is credited.
+}\\[.2in]
+Department of Electrical Engineering and Computer Science\\
+University of Tennessee, Knoxville\\
+{\tt web.eecs.utk.edu/\Tilde mclennan}
+}
+\maketitle
+\begin{abstract}
+A syntax macroprocessor permits parameterized text substitutions with greater syntactic flexibility than allowed with ordinary macroprocessors. This report describes the \emph{synmac} syntax macroprocessor, which permits arbitrarily delimited macro invocations, and thus allows the definition of new statement and expression forms or even complete languages.
+Synmac is also a computationally complete programming language.
+This report defines the synmac macro language, documents a prototype implementation, and gives examples of its use.
+\end{abstract}
+%
+%%%%%%%%%%%%%%%%%
+\Section{Introduction}{Introduction}
+A \emph{syntax macroprocessor} is like an ordinary macroprocessor in that it scans a \emph{source text}, copying it to a \emph{target text}, in the process scanning for macro definitions and macro calls, which may have parameters.
+Macro calls are \emph{expanded} (replaced by their definitions) when they are encountered, with actual parameters being substituted for formal parameters.
+Whereas ordinary macroprocessors have a simple macro call syntax (e.g., a macro name followed by a parenthesized list of actual parameters), a \emph{syntax macroprocessor} provides much greater syntactic flexibility in macro calls.
+This report describes a syntax macroprocessor provisionally named ``synmac,'' specifies the language, and provides examples of its use.
+
+There are a range of application scenarios for a syntax macroprocessor.
+Perhaps the most common is as a tool for defining common parameterized abbreviations.
+In this case, the source text would be largely in the target language, with macro invocations interspersed here and there.
+Macros might be defined for common code templates or for introducing application-specific constructs into the language.
+As an extreme case of this, synmac can be used as a parameterized pattern replacement engine, which can recognize specific target-language patterns in the source text and replace them with other target-language text.
+(It could even be used like a text editor to globally replace incorrect text by correct text.)
+At the other extreme, synmac can be used to define an entirely different language, independent of the target language.
+In this case, the source text would be entirely in the defined language, but it would be translated by the macros into the target language.
+For example, we have used synmac for a prototype implementation of the \emph{morphgen} language that translates into MatLab/Octave code \cite{CF2D-TR}.
+\Future{
+The synmac syntax macroprocessor is a work in progress and may continue to evolve.
+Ideas being considered for future versions, and thus possible incompatibilities, are displayed in this way.
+This report describes ``version \Version'' of synmac;
+previous versions are described elsewhere \cite{SSM-TR5}.
+}
+%%%%%%%%%%%%%%%%%
+\Section{Philosophy}{Philosophy}
+\Subsection{Limited Syntactic Flexibility}
+The intent of a \emph{syntax} macroprocessor is to permit more flexibility in the syntax of macro invocations than the relatively rigid syntax permitted by ordinary macroprocessors.
+But how much flexibility?
+In the limit, we might allow, for example, any syntax describable by a context-free grammar, but then we have a translator writing system rather than a macroprocessor.
+The challenge, then, is to find a balance between the syntactic rigidity of an ordinary macroprocessor and the syntactic flexibility of a translator writing system.
+Our design point in this space is to permit macro invocations in which parameters are separated by arbitrary delimiters and the invocation begins with one or more delimiters (see Sec.\ \ref{sec:Patterns} for details).
+All of the delimiters are used in determining which macro to invoke, which permits defining families of related macros for different situations.
+This covers the most common applications of syntax macros.
+In particular, however, synmac does not include an expression parser, and so the user will be using, for the most part, the expression syntax of the target language.\footnote{
+It is possible, however, to define expression parsing within synmac;
+see Section \ref{sec:Infix Expressions}.
+}
+%%%%%%%
+\Subsection{Multiple Syntactic Conventions}
+One common use of a syntax macroprocessor such as synmac is to implement a prototype translator from some source language into a \emph{target language}.
+For example, synmac has been used to implement the \emph{morphgen} morphogenetic programming language by translating it to MatLab/Octave code \cite{CF2D-TR}.
+Therefore, a syntax macroprocessor must negotiate among three sets of lexical and syntactic conventions:
+(1) the lexics and syntax of the macro language (syntax for definitions, invocations, etc.),
+(2) the lexics and syntax of the source language,
+and (3) the lexics and syntax of the target language.
+In the morphgen example, we are dealing with the lexical and syntactic conventions of synmac, morphgen, and MatLab/Octave.
+There may be irreconcilable incompatibilities, and sometimes concessions must be made in the source language.
+Synmac addresses this problem by having a minimal set of lexical and syntactic conventions and by allowing these to be altered to avoid incompatibilities (see Sec.\ \ref{sec:Setting Parameters}, p.\ \pageref{sec:Setting Parameters}).
+A syntax macroprocessor cannot, in general, do much syntax checking, since if it doesn't recognize the structure of some text, it has to assume it may be in the target language, about which it's ignorant.
+
+There are three interfaces between the source and target languages.
+The first is the embedding of macro invocations in target language text, which is how macros are commonly used.
+Therefore it must be possible to recognize the transition from the lexical structure of the target language to the lexical structure of synmac (and back) so that macro invocations are recognized, and to do this in a transparent and readable way.
+The second interface is between the defined delimiters of a macro and the actual parameters they surround, which can include both target language text and source text.
+Finally, the bodies of macro definitions can mix the source and target languages.
+The lexical conventions of synmac, built on whitespace and special characters, are designed to make these transitions as smooth and transparent as possible.
+%%%%%%%%%%%%%%%%%
+\Section{Definition}{Definition of Syntax Macros}
+\Subsection{Tokens and Other Lexical Elements}
+The macro processor manipulates sequences of tokens, strings, and whitespace.
+A synmac source file is tokenized (parsed into tokens, strings, and whitespace) before any other macroprocessing.
+\Subsubsection{Tokens}
+Characters are classified as alphanumeric, special, or whitespace. Each single special character is a token. Each maximal contiguous sequence of alphanumeric characters is a token. Therefore alphanumeric tokens (which we call ``words'') must be separated from other words by whitespace or special characters. The newline character is considered a special character. For the purpose of determining tokens, the class of alphanumeric characters can be extended (for example to include ``\_'');
+see Sec.\ \ref{sec:Alpha characters} below.
+These rules can occasionally lead to surprising results.
+For example, the decimal number ``0.25'' is considered three tokens: ``0'', ``.'', and ``25''.
+If this is a potential problem, then the class of alphanumeric characters can be extended to include the decimal point, which is generally safe to do.
+\Subsubsection{Whitespace}
+Whitespace is generally passed through, which preserves formatting. It is also used to separate words (alphanumeric tokens).
+\Subsubsection{Newlines}
+In general newlines are passed through like whitespace, but they are considered (more or less invisible) tokens, and so they can be used as delimiters in macros.
+\Subsubsection{Strings}
+String literals evaluate as themselves, but when they are finally written to the output file, their quotes are removed. 
+They are a means of passing source text into the target text and ensuring it is not altered in any way. 
+See Secs.\ \ref{sec:Quotes} and \ref{sec:Superquote}, respectively, for changing the default string quote (\verb+"+) and superquote (by default ``\verb+\+'').
+\Subsection{Patterns}
+\Subsubsection{Delimiter Structure}
+A macro definition has the following syntax:\footnote{
+The grammatical notation is defined with the complete grammar in the appendix, p.\ \pageref{sec:grammar}.
+}
+\[ \nterm{definition} ::= \Alt
+    \word{syntax}\ \nterm{pattern}\ \word{means}\ \nterm{template}\ \word{endsyntax}\\
+    \word{pattern}\ \nterm{pattern}\ \word{endpattern}
+  \Endalt
+\]
+The syntax of a $\nterm{pattern}$ is:
+\neqn{patn}{
+ \nterm{pattern} ::= \nterm{delim}^+\ [\nterm{param} \nterm{delim}^+]^*\ [\nterm{short\ param}]
+}
+The basic principle is that a pattern has to start with delimiters (to initiate the pattern matching process) and that parameters need to be separated by delimiters, except for the optional final short parameter, which is self-delimiting.
+The $\nterm{pattern}$ is in effect a distributed name for the macro, since the macro will not be called unless the invocation matches the entire pattern.
+Whitespace is ignored in patterns.
+\Subsubsection{Parameters}
+As indicated in the above syntax, parameters must be separated by one or more delimiters.
+Macros can have three kinds of parameters, which we call \emph{long parameters}, \emph{short parameters}, and \emph{unevaluated parameters}, but these terms are somewhat misleading.
+The syntax of formal parameters is as follows:
+\begin{eqnarray*}
+\nterm{param} &::=& \nterm{short\ param}\ |\ \nterm{long\ param}\ |\ \nterm{uneval\ param}\\
+\nterm{short\ param} &::=& \Tilde\nterm{word} \\
+\nterm{long\ param} &::=& \&\nterm{word} \\
+\nterm{uneval\ param} &::=& \mbox{'}\nterm{word}
+\end{eqnarray*}
+A short parameter expects to match a single well-defined source expression, which is a single token or a macro invocation, which can, however, have other invocations in its actual parameters
+(see Sec.\ \ref{sec:evaluation} for syntax).
+Although it's called a ``short'' parameter, and that is often its use, the corresponding actual can in fact be many lines long, so long as it's a single macro invocation.
+Nevertheless, the macroprocessor knows when it has got to the end of a short actual parameter, and that is its most important characteristic.
+
+A long parameter, in contrast, expects to match a sequence of zero or more source expressions, and therefore it can match a sequence comprising a mixture of tokens and macro invocations of any length
+(see Sec.\ \ref{sec:evaluation} for syntax).
+The macroprocessor knows it has got to the end of a long parameter by matching the delimiters that are required to terminate it.
+
+An unevaluated parameter expects to match a sequence of zero or more tokens up to a specified delimiter, much like a long parameter, but it does not evaluate any macro invocations that it might contain.
+
+Any token can be used as the name of a formal parameter, but it is normal and good style for it to be a descriptive alphanumeric token, and not a special character (hence, $\nterm{word}$ in the above grammar).
+\Subsubsection{Example Patterns}
+Here are some example patterns from the morphgen language definition \cite{CF2D-TR} (template bodies omitted):
+\begin{lstlisting}[frame=single]
+syntax del ~var means ... endsyntax // gradient
+syntax del^2 ~var means ... endsyntax // Laplacian
+syntax substance ~name: &variables behavior: &equations end
+    means ... endsyntax
+syntax display running ~subst as contours means ... endsyntax
+syntax report Courant number for ~vector means ... endsyntax
+\end{lstlisting}
+Here ``//'' marks an end-of-line comment (Sec.\ \ref{sec:Comments}).
+
+\Subsubsection{Match Order}
+The macroprocessor attempts to match an expression to the most recently defined macro, and if it does not match, it works backwards, trying previously defined macros.
+To put it in other words, macro definitions are placed on a stack, and the macroprocessor tries them from top to bottom.
+Therefore, macros can be redefined, and later definitions supersede earlier ones.
+This means that later macros with a more specific syntax that handles special cases can partially block earlier macros with a more general syntax that handle the general case (somewhat like methods in subclasses of a class).
+This also means that intrinsic macros (such as $\word{syntax}$) can be redefined, which might be useful in some cases, but the original definitions will be inaccessible.
+\Subsection{Pattern Elements}
+A pattern is a sequence of one or more pattern elements, which include token delimiters, newline delimiters, commit flags, and formal parameters (described in Sec.\ \ref{sec:Parameters}).
+The syntax of $\nterm{pattern}$s is given in Eq.\ \ref{eq:patn} for which $\nterm{delim}$ is defined:
+\neqn{delim}{
+ \nterm{delim} ::= \{\ \nterm{token}\ |\ \$\ |\ \mbox{\#}\ |\ \word{dedent}\ \}\ [\;!\;]
+}
+That is, a $ \nterm{delim}$ is a token delimiter, or a newline delimiter (\$), or an endline delimiter (\#), optionally followed by a commit flag (``!'').
+(These special characters can be changed; see Sec.\ \ref{sec:setting-parameters}.)
+\Subsubsection{Token Delimiters}
+Any token can serve as a delimiter that must be present in a macro invocation.
+Whitespace around delimiters is ignored for purposes of pattern matching.
+\Subsubsection{Newline and Endline Delimiters}
+\label{sec:newline-delimiters}
+The special pattern element ``\$''  (which can be changed, 
+Sec.\ \ref{sec:Newline, Endline, and Dedent Pattern Elements}) 
+represents a required newline as a delimiter.
+This is convenient especially for making a newline the final, closing delimiter in a template.
+For example:
+\begin{lstlisting}[frame=single]
+syntax for (~x, ~y) within &radius of (&xcent, &ycent):
+    ~var = &expr $ means ... endsyntax
+\end{lstlisting}
+permits an invocation such as this on a line by itself:
+\begin{lstlisting}[frame=single]
+for (h, v) within 0.06 of (0.1, -0.225): P = 1 - F(h,v)
+\end{lstlisting}
+The usual use of a newline delimiter is as the last delimiter in a pattern, as shown above, but it can also be used as a medial or initial delimiter.
+Especially in the latter case, the user should be aware that every newline in the source text will cause the macroprocessor to perform a pattern match, to see if it should invoke the newline-initial macro;
+this could be slow and lead to unexpected macro substitutions.
+
+As defined, the newline delimiter consumes the newline that it matches; this is often useful .
+However, there are also cases in which it would be convenient to have several nested macro calls all terminated by a single newline, and for this purpose it would be useful if the newline delimiter did not consume the newline that it matches.
+This case is represented by the \emph{endline} delimiter, which is represented by ``\#'' in patterns.
+An example application is an end-of-line comment, which does not consume the endline (cf.\ Sec.\ \ref{sec:Comments}):
+\begin{lstlisting}[frame=single]
+syntax // 'comment # means{}endsyntax
+\end{lstlisting}
+\Subsection{Dedent Delimiter}
+Indenting can be used to delimit syntax macro parameters.
+The $\word{dedent}$ pattern element delimits a parameter by ``dedenting,'' that is, by an indent level less than or equal to that at which the macro invocation began.\footnote{
+Therefore a pattern cannot begin with a dedent delimiter.
+}
+For this purpose, the indent level is determined by looking ahead to the next nonblank line; 
+the end of file is considered unindented.
+As a simple example, the following macro accepts and discards an unevaluated indented parameter, which is intended as documentation:
+\begin{lstlisting}[frame=single]
+syntax documentation: 'comment dedent means{}endsyntax
+\end{lstlisting}
+This is an example invocation, which expands as just the two assignment statements:
+\begin{lstlisting}[frame=single]
+documentation:
+  This is the first stage of initialization of the matrices.
+  The indices are initialized for the beginning of the search.
+outer_index = 0
+inner_index = 0
+\end{lstlisting}
+The delimiting newlines are not consumed, so a particular indent level will match all open dedents for macros invoked at or above that level.
+For example, this defines an ``until loop'' for python:
+\begin{lstlisting}[frame=single]
+syntax // 'comment $ means{}endsyntax
+syntax until &condition: &body dedent means//
+while not(condition):
+    body 
+endsyntax 
+\end{lstlisting}
+(`//' in the ``until'' definition absorbs the end of line so that the indenting of ``until'' is preserved;
+otherwise ``while'' begins on a new line.)
+Here is an example nested invocation:
+\newpage %%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{lstlisting}[frame=single]
+until x<1:
+  until y<1:
+    x = sqrt(x)
+    y = sqrt(y)
+    n += 1
+print(n)
+\end{lstlisting}
+A macro pattern can have several $\word{dedent}$s, but they all will be matched by the same indent level, so any actual parameters after the first will be empty.
+
+The body of a macro may contain invocations of macros with dedent-delimited parameters.
+For this purpose, the body of the macro is evaluated as though it is unindented (i.e., starts on a new line). 
+For example,
+\begin{lstlisting}[frame=single]
+syntax header means{ documentation:
+                        This is some documentation 
+                        that will be ignored.
+                     initialization()
+}endsyntax
+\end{lstlisting}
+is expanded as though it were written,
+\begin{lstlisting}[frame=single]
+syntax header means{ 
+ documentation:
+    This is some documentation 
+                        that will be ignored.
+                     initialization()
+}endsyntax
+\end{lstlisting}
+and so ``initialization()'' becomes part of the comment.
+Therefore, to avoid confusion, it is good practice to write starting on a new line the template of macro definitions that invoke dedent delimited macros, as in this example:
+\begin{lstlisting}[frame=single]
+syntax header means{ 
+documentation:
+    This is some documentation 
+    that will be ignored.
+initialization()
+}endsyntax
+\end{lstlisting}
+\Subsubsection{Commit Flag}
+When the macroprocessor tries to match the source text to a macro definition, if a sought delimiter is missing, it simply assumes that the source text is not a call of that macro.
+It backtracks and tries other macro definitions.
+Therefore, if you make an error in the syntax of a macro call, it may simply be passed unexpanded into the target text.
+In many cases, however, as macro designers we know that the first tokens determine the macro to be called, and if later delimiters are missing we want a diagnostic message; we don't want the macroprocessor to ignore it.
+For this purpose we have a \emph{commit flag} (``!'' by default) that can be put after any delimiter.
+It means that if we have got this far in the pattern matching, then the rest of the delimiters must be present.
+If any are not, synmac can produce an informative error message.
+Here is an example of its use:
+\begin{lstlisting}[frame=single]
+syntax ||! &exp || means L2norm(exp) endsyntax 
+\end{lstlisting}
+This tells the macroprocessor that whenever it sees ``\lstinline"||"'' it should expect to find a matching ``\lstinline"||"'', and that if it does not, it should generate a useful error message.
+Of course, you can do this only if this is the only macro beginning with ``\lstinline"||"'' and only if ``\lstinline"||"'' is not used for other purposes in the source text. 
+\Subsection{Templates}
+A template is the body of a macro, which is a (possibly) empty sequence of tokens with optional interspersed whitespace.
+(As explained later, a $\nterm{template}$ is syntactically an $\nterm{expr seq}$, Eq.\ \ref{eq:expr seq}, p.\ \pageref{eq:expr seq}.)
+Some of these tokens are formal parameter names.
+Formal parameters in the template are not marked in any special way, but the macroprocessor recognizes them because they are bound to the values of the corresponding actual parameters.
+When a macro is invoked, its body is processed in two steps:
+First, the formal parameters are replaced by the actual parameters to which they are bound.
+This includes substituting actuals for formals inside metaquotations (Sec.\ \ref{sec:Metaquotations}).
+Second, the resulting expression sequence is evaluated (expanded), and the resulting expansion replaces the macro invocation. Any whitespace in the template is retained, which preserves formatting.
+\Future{
+This treatment of metaquotations combines actual-formal substitution with delayed evaluation, and provides a capability similar to a lambda expression (so the metaquotes actually denote delayed evaluation).
+It is unclear whether it is the best choice.
+Perhaps metaquotes should work similar to string quotes and prevent all processing (but then we might want another mechanism to do substitution without evaluation).
+}
+\Subsection{Constant Macros}
+In Section \ref{sec:Multiple Syntactic Conventions} we mentioned the issues that arise from having to deal with three sets of lexical and syntactic conventions (synmac, source language, target language).
+One of these is that synmac knows nothing about the syntax of the target language (e.g., that parentheses and brackets should be matched).
+For example, if we define a syntax macro:
+\begin{lstlisting}[frame=single]
+syntax succ(&arg) means arg + 1 endsyntax
+\end{lstlisting}
+and call it like this:
+\begin{lstlisting}[frame=single]
+x = succ(A[(N-1)*2])
+\end{lstlisting}
+then the result will be
+\begin{lstlisting}[frame=single]
+x = A[(N-1 + 1 *2])
+\end{lstlisting}
+which is not what was intended.
+This is because the parameter \lstinline"&arg" matched the actual up to the first close parenthesis, that is, it matched ``\lstinline"A[(N-1"'', and substituted it for ``\lstinline"arg"'' in the body of ``succ''.
+The problem is that synmac does not know that we expect parentheses and brackets to be matched in macro arguments.
+We can inform it of these requirements by declaring them as \emph{constant macros}:
+\begin{lstlisting}[frame=single]
+pattern ( &expr ) endpattern
+pattern [ &expr ] endpattern
+\end{lstlisting}
+These are like standard syntax declarations, but they have no bodies (templates).
+This means that synmac will recognize and process them like ordinary macros, but treat them like constant functions (i.e., they expand as themselves, but don't result in recursive invocation).
+If no other macros begin with an open parenthesis and bracket, then we will get better error diagnostics by using the commit flag:
+\begin{lstlisting}[frame=single]
+pattern (! &expr ) endpattern
+pattern [! &expr ] endpattern
+\end{lstlisting}
+
+\Subsection{Metaquotations}
+Expansion of a token sequence can be suppressed by surrounding it with metaquotes (by default \{\}), which can be nested. When a metaquoted sequence is evaluated, the outermost metaquotes are removed. Therefore, when an actual parameter contains metaquoted sequences, the outermost metaquotes are removed in the substituted parameter. 
+Actual-formal parameter substitution \emph{does} take place in metaquotations in macro templates (see Sec.\ \ref{sec:Templates}).
+The default metaquotes can be changed (see Sec.\ \ref{sec:Metaquotes}).
+%%%%%%%%%%%%%%%%%
+\Section{Expansion}{Expansion Semantics}
+\Subsectiont{evaluation}{Expansion as Expression Evaluation}
+The source text is really an expression sequence, which is evaluated (``expanded'') to yield the target text. Plain text (that is, text that is not recognized as a macro invocation) is treated as constant text that is passed unchanged to the output. Embedded macro invocations are evaluated and replaced by their results (expansions), as explained below. (Syntax definitions and pragmatic commands are treated as intrinsic macro invocations with side-effects.)
+
+More precisely, an \emph{expression sequence} is a sequence of zero or more expressions possibly separated and surrounded by whitespace:
+\neqn{expr seq}{
+  \nterm{expr seq} ::= [\nterm{whitespace}]\ [\ \nterm{expr} [\nterm{whitespace}]\ ]^*
+}
+The elements of the expression sequence are evaluated in order. Whitespace is copied into the result; expressions are replaced by their values.
+
+An \emph{expression} is either a macro invocation, a string literal, a metaquoted expression sequence, or a token (special character or alphanumeric word) that does not begin a valid macro invocation (the latter are called \emph{undefined tokens}).
+Therefore the syntax for an expression is
+\neqn{expr}{
+  \nterm{expr} ::= \left\{ \begin{array}{l}
+    \nterm{invocation} \\
+    \nterm{string} \\
+    \obrace \nterm{expr seq} \cbrace \\
+    \nterm{token}
+  \end{array} \right\}
+}
+
+The result of evaluating an undefined token is that token (i.e., they are treated as constants).
+The result of evaluating a string literal is that string; quotes are not removed during evaluation, but when the string is finally written to the output file, the quotes are removed.
+The results of evaluating a metaquotation is the enclosed expression sequence with the outer metaquotes deleted but inner nested metaquotes preserved.
+The evaluation of macro invocations is described below.
+\Future{
+It is not obvious that the preceding is the best way of evaluating strings and metaquotations.
+Stripping off the quotes allows the enclosed text to be evaluated later; that is, quotation \emph{delays} evaluation, and this is sometimes useful.
+For example, we generally want to delay the evaluation of the arguments to the $\word{syntax}$ macro.
+On the other hand, in other circumstances we want to completely prevent the evaluation of some source text, so that it is preserved into the target text, which argues for leaving the quotes on no matter how many times the quotation is evaluated.
+In this case, we might want an intrinsic operator to force evaluation by removing the quotes.
+}
+\Subsection{Eager Evaluation}
+The macro processor uses an eager evaluation order, that is, actual parameters are evaluated (expanded) before they are substituted for the formal parameters in the body of the macro.
+\Subsection{Evaluation Order}
+\Subsubsection{Expanding an expression sequence}
+The macroprocessor proceeds through an expression sequence, expression by expression, concatenating their values to produce the result of evaluating the expression sequence (with intervening whitespace preserved).
+An expression is evaluated by inspecting its first token.
+If it is a string literal or a open metaquote, then the quotation is processed as described above (Sec.\ \ref{sec:evaluation}).
+Otherwise the macroprocessor attempts to match a pattern.
+\Subsubsection{Attempting a pattern match}
+The macroprocessor attempts to match each defined macro pattern to the expression text, starting with the most recently defined macro and working backwards.
+(Thus later definitions supersede earlier ones.)
+If at any point the expression does not match the pattern, then the match it abandoned.
+If the pattern has been \emph{committed} (Sec.\ \ref{sec:Commit Flag}) then a diagnostic is generated (showing the pattern and the unmatching text).
+Whenever a match is abandoned (whether committed or not), the macroprocessor bactracks over any matched text and proceeds to try earlier definitions.
+(Note, however, that if the evaluation of actual parameters has had side-effects, these side-effects will not be undone.)
+Therefore you can have alternative macro definitions, or more generic definitions followed by more specific ones.
+If a word does not begin any successful pattern match, then it is considered an undefined token and is returned as the value of the expression.
+
+Consecutive delimiters in the pattern are matched against successive delimiters in the expression, but intervening whitespace is ignored.
+Thus, for example, the pattern text ``\lstinline""behavior:'' (two tokens) will match the expression text ``\lstinline[showspaces=true]"behavior :"'' (two tokens with intervening whitespace),
+and the pattern ``\lstinline">="'' will match ``\lstinline[showspaces=true]"> ="''.
+Newline, endline, and dedent delimiters attempt to match newlines in the expression text.
+\Subsubsection{Evaluating an actual parameter}
+When a formal parameter is encountered in the pattern, the macroprocessor attempts to parse and evaluate (expand) a corresponding actual parameter.
+If the formal parameter is a short (\verb+~+) parameter, then the macroprocessor skips whitespace in the token sequence and recursively evaluates a single expression.
+Therefore, the corresponding actual parameter text must conform to $\nterm{expr}$ (Eq.\ \ref{eq:expr}).
+Because initial whitespace is trimmed from a short actual parameter, and because parsing of a short actual parameter stops as soon as a complete $\nterm{expr}$ is found, effectively whitespace is trimmed from the beginning and end of short actual parameters.
+The evaluated actual parameter is bound to the formal parameter (eager evaluation).
+
+If the formal parameter is a long (\verb+&+) parameter, then the macroprocessor expects to find an expression sequence (Eq.\ \ref{eq:expr seq}), which must be terminated by the delimiter that follows the long formal parameter in the pattern (Eq.\ \ref{eq:patn}, p.\ \pageref{eq:patn}).
+The macroprocessor will recursively evaluate the expression sequence, as described in this section (Sec.\ \ref{sec:evaluation}), until it finds the terminating delimiter.
+Any whitespace in the actual parameter will be preserved in the value bound to the formal parameter.
+If the required delimiter is not found, then the pattern match fails and the macroprocessor backtracks
+(but any side-effects resulting from evaluation of the actual will remain).
+
+If the formal parameter is an unevaluated (\verb+'+) parameter, then the macroprocessor expects to find a token sequence terminated by the delimiter that follows the formal parameter. If the required delimiter is not found, then the pattern match fails and the macroprocessor backtracks. The unevaluated actual parameter, including any whitespace, is substituted for the corresponding formal wherever it occurs in the body of the macro. Note, however, that although the actual parameter is substituted in unevaluated form, subsequent evaluation of the body might cause it to be evaluated
+(see Sec.\ \ref{sec:evaluating-body}).
+\Subsubsection{Substituting actual parameters for formal parameters}
+If a token sequence successfully matches a macro's pattern, then the actual parameters are substituted for the formal parameters in the macro's template or body.
+The tokens (including whitespace) in the template are processed in order, and whenever a word is found to be bound, it is replaced by the token sequence to which it is bound.
+Formal parameters in the template do not need to be flagged, for example:
+\begin{lstlisting}[frame=single]
+syntax del ~var   // gradient
+  means {grad(var, delta_s)} endsyntax
+syntax del^2 ~var // Laplacian
+  means {lapl(var, delta_s, delta_s)} endsyntax
+syntax space! : &xlwb < x < &xupb, &ylwb < y < &yupb$ means
+  x_lwb = xlwb;
+  x_upb = xupb;
+  y_lwb = ylwb;
+  y_upb = yupb;
+  x_extent = x_upb - x_lwb;
+  y_extent = y_upb - y_lwb;
+endsyntax
+\end{lstlisting}
+
+\Subsubsection{Evaluating the body}
+\label{sec:evaluating-body}
+After the actuals have been substituted for the formals in the template of the macro, the resulting macro body is evaluated as an expression sequence and becomes the value of the macro invocation.
+Evaluation of the body may have side-effects, for example, if it includes $\word{syntax}$ definitions.
+\Subsection{Preventing Evaluation}
+		Surrounding text with the metaquotes (\{\} by default) prevents evaluation (expansion) of the enclosed text. Their most common use is to surround the arguments of the syntax definition commands, which are otherwise evaluated like any other actual parameters. If you're doing something tricky (Sec.\ \ref{sec:Tricks}), you might want to compute the pattern or macro template, but this is not the usual case. You can usually get away without metaquoting the arguments of syntax definitions, but it's better practice to metaquote them (unless you're doing something tricky) and thereby avoid hard-to-find errors.
+%%%%%%%%%%%%%%%%%
+\Section{Examples}{Examples}
+In this section we present several examples of synmac as an interpreter.
+This is not its most common use, but it illustrates its computational power
+(it is in fact Turing-complete).
+\Subsection{Peano Arithmetic}
+By Peano arithmetic, we mean the definition of basic arithmetic operations in terms of integers defined as successors of zero.
+It illustrates a kind of equational programming.
+We begin with some preliminary definitions and declarations:
+\begin{lstlisting}[frame=single]
+syntax || 'text # means{}endsyntax
+||
+|| Peano Arithmetic
+||
+#set syntax def as $
+#set pattern declare $
+\end{lstlisting}
+The first line defines ``\verb+||+'' as an end-of-line comment.
+The last two lines declare alternative syntax for macro definitions, which is more appropriate to recursive arithmetic.
+%
+The next group of definitions defines several numerals in terms of the successor:
+\begin{lstlisting}[frame=single,language=func]
+declare succ[~arg]
+def 1 as succ[0]
+def 2 as succ[1]
+def 3 as succ[2]
+\end{lstlisting}
+The ``declare'' line ensures that synmac recognizes that square brackets should be matched (on this issue, see Sec.\ \ref{sec:Constant Macros}).
+Since the templates of the numeral definitions are not surrounded by metaquotes, they are expanded at definition time.
+Therefore, for example, ``3'' is defined to be ``\lstinline"succ[succ[succ[0]]]"'' not ``\lstinline"succ[2]"'' as you might expect.
+This makes no difference here, but it could make difference with recursive macros (leading, for example, to infinite recursion).
+
+Now we can define addition recursively, both prefix and (fully parenthesized) infix notation:
+\begin{lstlisting}[frame=single,language=func]
+def sum[succ[~M], ~N] as {succ[(M + N)]}
+def sum[0, ~N] as {N}
+def (~M + ~N) as {sum[M,N]}
+\end{lstlisting}
+Notice that we have surrounded the bodies of the macros with metaquotes to delay evaluation.
+They are not strictly necessary if the definitions are ordered as they are here, but it's good synmac coding and will prevent hard-to-diagnose errors.
+Subtraction is defined:
+\begin{lstlisting}[frame=single,language=func]
+def dif[succ[~M], succ[~N]] as {(M - N)}
+def dif[~M, 0] as {M}
+def (~M - ~N) as {dif[M,N]}
+\end{lstlisting}
+Using addition we can define multiplication:
+\begin{lstlisting}[frame=single,language=func]
+def prod[succ[~M], ~N] as {(N + (M * N))}
+def prod[0, ~N] as {0}
+def (~M * ~N) as {prod[M,N]}
+\end{lstlisting}
+%(As an exercise, you can try defining integer division.)
+We can test our definitions by entering:
+\begin{lstlisting}[frame=single]
+"3 + 2 + 1 =" ((3+2)+1)
+"3 * 2 * 1 =" ((3*2)*1)
+"3 + 3 - 2 =" ((3 + 3) - 2)
+\end{lstlisting}
+This source text expands as the following target text, which is correct:
+\begin{lstlisting}[frame=single]
+3 + 2 + 1 =   succ[  succ[  succ[  succ[  succ[  succ[0]]]]]]
+3 * 2 * 1 =     succ[  succ[succ[succ[succ[succ[0]]]]]]
+3 + 3 - 2 =       succ[succ[succ[succ[0]]]]
+\end{lstlisting}
+(There are redundant spaces, which could be eliminated at the expense of making the \textbf{syntax} definitions less readable.)
+It is hard to read these long strings of successors, so we can define (limited) decimal decoding:
+\begin{lstlisting}[frame=single,language=func]
+def decimal ~N as {dec[N, "0", "1", "2", "3", "4", "5", ||
+  "6", "7", "8", "9", "10"]}
+def dec[0, ~first, &rest] as {first}
+def dec[ succ[~N], ~first, &rest] as {dec[N, rest]}
+\end{lstlisting}
+The ``decimal'' macro uses an auxiliary macro ``dec'', which counts off the ``succ''s in parallel with the numeral strings.
+With these definitions, the source text
+\begin{lstlisting}[frame=single]
+"2 * 3 - 2 =" decimal((2*3)-2)
+"(3 * 2) - 2 + (2 * 3) =" decimal (((3*2)-2) + (2*3))
+\end{lstlisting}
+expands as:
+\begin{lstlisting}[frame=single]
+2 * 3 - 2 =       4
+(3 * 2) - 2 + (2 * 3) =             10
+\end{lstlisting}
+\Future{
+Obviously, this is a stupendously inefficient implementation of arithmetic.
+If in the future it is found useful to have synmac do arithmetic, it will be included by means of intrinsic (built-in) macros.
+}
+
+\Subsection{Infix Expressions}
+Although synmac does not include an expression parser, it is possible to define syntax macros that provide limited infix expression parsing.
+We begin by changing the metaquotes so that we can use curly braces as delimiters, and declare balanced parentheses as a pattern:
+\begin{lstlisting}[frame=single]
+syntax || 'text # means{}endsyntax  || end-of-line comments
+#set metaquotes < >
+pattern <(&E)> endpattern
+\end{lstlisting}
+We begin by handling ``\lstinline"*"'' and ``\lstinline"/"'' signs:
+\begin{lstlisting}[frame=single]
+syntax <term {&F}> means <factor{F}> endsyntax
+syntax <term {&F * &T}> 
+  means <prod[factor{F}, term{T}]> endsyntax
+syntax <term {&F / &T}> 
+  means <quot[factor{F}, term{T}]> endsyntax
+\end{lstlisting}
+Since patterns are tried in reverse order, the patterns 
+``\lstinline"term {&F * &T}"'' and\\ ``\lstinline"term {&F / &T}"'' will attempt to match an expression in curly braces up to the first ``\lstinline"*"'' and ``\lstinline"/"'', which will be bound to F (standing for ``factor'').
+The remainder of the text up to the close curly brace will be bound to T (standing for ``term'').
+Since the text bound to T may include additional ``\lstinline"*"'' and ``\lstinline"/"'' signs, it is submitted recursively to ``term'' for further processing.
+If, however, the argument of ``term'' does not contain these operators, then it is submitted to ``factor'' for further processing, the rules for which are as follows:
+\begin{lstlisting}[frame=single]
+syntax <factor {&F}> means F endsyntax
+syntax <factor {(&E)}> means <expr{E}> endsyntax
+\end{lstlisting}
+The second line submits a parenthesized expression to ``expr'' for expansion; the first, which handles simple unparenthesized factors (such as variable names and numbers), returns its argument without further processing.
+Here are some simple tests:
+\begin{lstlisting}[frame=single]
+term{A / B}
+term{2*A*B}
+\end{lstlisting}
+which expand as:
+\begin{lstlisting}[frame=single]
+quot[ A  ,    B  ] 
+prod[ 2 ,  prod[ A ,   B  ] ] 
+\end{lstlisting}
+The ``\lstinline"+"'' and ``\lstinline"-"'' signs are handled similarly by expr:
+\begin{lstlisting}[frame=single]
+syntax <expr {&T}> means <term{T}> endsyntax
+syntax <expr {&T + &E}> 
+  means <sum[term{T}, expr{E}]> endsyntax
+syntax <expr {&T - &E}> 
+  means <dif[term{T}, expr{E}]> endsyntax
+\end{lstlisting}
+We can test it with these expressions
+\begin{lstlisting}[frame=single]
+expr {2*B + C}
+expr {A-2*C}
+expr {1/(C+D)}
+\end{lstlisting}
+which expand correctly:
+\begin{lstlisting}[frame=single]
+sum[ prod[ 2 ,   B   ] ,     C   ] 
+dif[  A  ,   prod[ 2 ,   C  ]  ] 
+quot[ 1 ,    sum[  C  ,    D   ]   ]  
+\end{lstlisting}
+We can now use infix expressions in appropriate contexts such as assignment statements:
+\begin{lstlisting}[frame=single]
+syntax let ~D :=  &E; means <setq[D, expr{E}]> endsyntax
+\end{lstlisting}
+We can test it with this text:
+\begin{lstlisting}[frame=single]
+let X := (A+B)*(C-D);
+let Y := A - B - 1;
+\end{lstlisting}
+which leads to the expansion (with some blanks deleted for readability):
+\begin{lstlisting}[frame=single]
+setq[X, prod[ sum[ A , B ] , dif[ C , D ] ] ] 
+setq[Y, dif[ A , dif[ B , 1 ] ] ] 
+\end{lstlisting}
+So we can define infix expressions, but if you look closely at the above examples, you will see that some of the translations are surprising.
+For example, A--B--1 is translated dif[A, dif[B,1]], which means the same as A--(B--1), that is, the operations associate to the right, which is not the usual convention.
+It is possible to write synmac syntax macros that implement left-associative operators, but they are more complicated, and do not need to be presented here.\footnote{
+Left-associative infix operators can be handled as follows.
+First define a set of recursive macros that reverse the order of terms connected by + and -- and also reverse the order of factors connected by * and / (continuing into parentheses if necessary), replacing the normal operators by specially marked ``reversed'' operators.
+For instance, these macros transform ``\lstinline"A / (B - 2)"'' into ``\lstinline"(2 ^- B) ^/ A"''.
+Next, write recursive macros similar to those in Sec.\ \ref{sec:Infix Expressions} that transform the reversed operators into function calls.
+For example, ``\lstinline"(2 ^- B) ^/ A"'' becomes ``\lstinline"quot[A, dif[B, 2]]"''.
+}
+\Subsection{Simple LISP}
+LISP-like list processing provides another example of synmac as a computational engine and illustrates some programming techniques.
+We begin, as before, with some preliminary declarations:
+\begin{lstlisting}[frame=single]
+syntax || 'text # means{}endsyntax
+|| LISP-style Lists
+#set syntax def = ;
+#set pattern declare ;
+\end{lstlisting}
+In this case, we've decided to terminate the declarations with semicolons.
+Next we declare the essential relations that define a list
+(represented by the constructor cons($H$,$T$)):
+\begin{lstlisting}[frame=single,language=func]
+declare cons (~H, ~T);
+def car(cons(~H,~T)) = H;
+def cdr(cons(~H,~T)) = T;
+\end{lstlisting}
+The first line tells synmac that ``cons($H$,$T$)'' is a well-defined structure, and the last two define the ``car'' and ``cdr'' functions to select the two halves of this structure.
+To match these patterns, the argument to car or cdr will have to be an explicit cons structure (since that is part of the pattern).
+In general, we might want to compute the arguments, so we wrap these in the functions that users are expected to use:
+\begin{lstlisting}[frame=single,language=func]
+def first(~L) = {car(L)};
+def rest(~L) = {cdr(L)};
+\end{lstlisting}
+We can try these out by defining a list and testing a couple of identities:
+\begin{lstlisting}[frame=single,language=func]
+def Lst = cons(A,cons(B,nil));
+"first Lst =" first(Lst)
+"rest Lst =" rest(Lst)
+"Lst =" cons(first(Lst), rest(Lst))
+\end{lstlisting}
+This is the expansion:
+\begin{lstlisting}[frame=single]
+first Lst =   A
+rest Lst =   cons(B,nil)
+Lst = cons(  A,  cons(B,nil))
+\end{lstlisting}
+Instead of writing lists in terms of cons's, it's more convenient to have a list notation, such as $[C, D, E]$, which we can define recursively:
+\begin{lstlisting}[frame=single,language=func]
+def [] = nil;
+def [~H] = {cons(H, nil)};
+def [~H, &T] = {cons(H, [T])};
+\end{lstlisting}
+We can test both simple and nested lists:
+\begin{lstlisting}[frame=single,language=func]
+def Lst2 = [C, D, E];
+def Lst3 = [[U, V], [X, Y]];
+"Lst2:"Lst2
+"Lst3:"Lst3
+\end{lstlisting}
+which expands as:
+\begin{lstlisting}[frame=single]
+Lst2:  cons(C,cons(D,cons(E,nil)))
+Lst3:  cons(cons(U,cons(V,nil)),cons(cons(X,cons(Y,nil)),nil))
+\end{lstlisting}
+Reading these nested cons's is tedious, so we can define a ``pretty print'' function.
+Here is a first attempt, which uses an auxiliary function to deconstruct the list:
+\begin{lstlisting}[frame=single,language=func]
+def prettyprint(~L) = {"["ppaux(L)"]"};
+def ppaux(cons(~H,~T)) = {H, ppaux(T)};
+def ppaux(cons(~H,nil)) = H;
+def ppaux(nil) = ;
+\end{lstlisting}
+The square brackets are quoted because we don't want to invoke the square bracket macro that we previously defined!
+Notice also the order of the ppaux definitions; the second is more specific than the first, and so it must follow the first.
+Here is a test:
+\begin{lstlisting}[frame=single]
+"Lst2 =" prettyprint(Lst2)
+"Lst3 =" prettyprint(Lst3)
+\end{lstlisting}
+which produces:
+\begin{lstlisting}[frame=single]
+Lst2 =  [ C,  D,  E]
+Lst3 =  [ cons(U,cons(V,nil)),  cons(X,cons(Y,nil))]
+\end{lstlisting}
+Clearly, this doesn't handle nested lists correctly, but we can fix that by adding:
+\begin{lstlisting}[frame=single,language=func]
+def ppaux(cons(cons(~H,~T),~U))  || handle nested lists
+  = {prettyprint(cons(H,T)), ppaux(U)};
+def ppaux(cons(cons(~H,~T),nil)) = {prettyprint(cons(H,T))};
+\end{lstlisting}
+Then the test
+\begin{lstlisting}[frame=single]
+"Lst3 =" prettyprint(Lst3)
+\end{lstlisting}
+expands correctly:
+\begin{lstlisting}[frame=single]
+Lst3 =  [  [ U,  V],   [ X,  Y]]
+\end{lstlisting}
+
+In the preceding examples, we have used an equational style of programming, in which patterns are used to test for arguments in various forms.
+For more general programming it may be more convenient to have conventional boolean values and conditionals.
+We begin with a way of testing whether a list is empty.
+As before, we define a low-level pattern that matches a cons structure, and wrap it in a user-callable ``empty'' function:
+\begin{lstlisting}[frame=single,language=func]
+def null(nil) = true;
+def null(cons(~H,~T)) = false;
+def empty(~L) = {null(L)};
+\end{lstlisting}
+We can try them out:
+\begin{lstlisting}[frame=single]
+"empty (nil) =" empty(nil)
+"empty (Lst) =" empty(Lst)
+\end{lstlisting}
+and get the following correct answers:
+\begin{lstlisting}[frame=single]
+empty (nil) =   true
+empty (Lst) =   false
+\end{lstlisting}
+But what are ``true'' and ``false''?
+To make them useful, observe that they are fundamentally choices and therefore define them (using an idea common from $\lambda$ calculus programming language semantics):
+\begin{lstlisting}[frame=single,language=func]
+def true(&T,&F) = T;
+def false(&T,&F) = F;
+def if ~bool then ~tbranch else ~fbranch fi  
+ = {bool({tbranch},{fbranch})};
+\end{lstlisting}
+The ``if'' macro takes the boolean value and applies it to the true and false branches so that the boolean can select one or the other.
+The true and false branches are metaquoted to delay evaluation.
+Here's a simple test
+\begin{lstlisting}[frame=single]
+if empty(nil) then correct else incorrect fi
+if empty(Lst) then incorrect else correct fi
+\end{lstlisting}
+which returns:
+\begin{lstlisting}[frame=single]
+     correct     
+     correct
+\end{lstlisting}
+We can now use the conditional and other list operations to define a recursive function to append two lists:
+\begin{lstlisting}[frame=single,language=func]
+def append(~L,~M) = {  || append two lists
+ if empty(L) then M else cons(first(L),append(rest(L),M)) fi};
+\end{lstlisting}
+We can test it as follows:
+\begin{lstlisting}[frame=single]
+"Lst^Lst2^Lst3=" prettyprint(append(Lst, append(Lst2, Lst3)))
+\end{lstlisting}
+which produces the correct result:
+\begin{lstlisting}[frame=single]
+Lst^Lst2^Lst3=  [ A,  B,  C,  D,  E,   [ U,  V],   [ X,  Y]]
+\end{lstlisting}
+These are, I think, sufficient examples to illustrate the programming capabilities of synmac.
+\Section{Problems}{Dealing With Problems}
+Experience has shown that debugging syntax macro definitions and invocations can be very difficult.
+This is in part because of the flexible syntax permitted in patterns, which can match unexpected regions of the source text.
+Here we discuss a few common symptoms of problems and how they can be fixed;
+in hard cases you may have to use the debugging commands (Sec.\ \ref{sec:Debugging}).
+
+In general, the user is advised to proceed incrementally.
+Introduce one new macro at a time and try it out before adding others.
+Test simple cases first.
+(You know, the usual good programming practices!)
+See Section \ref{sec:Examples} for examples.
+
+\Subsection{Symptom: Macro is not evaluated}
+If a macro is not expanded (with the common symptom being that its invocation is copied into the target text), then the most obvious cause is that you have got the form of either the definition or the call incorrect.
+If one call out of many doesn't expand, then you likely have an error in it; compare it with the calls that did expand.
+If none of them expand, then you probably have an error in the definition.
+Inspect it carefully and, if necessary, use \textbf{\#set definitions on} to see how the macroprocessor read the definition (Sec.\ \ref{sec:Definition Dump}).
+
+Sometimes an error in an earlier macro invocation  can prevent a later one from expanding. 
+This can occur if an actual parameter of the former extends further than intended (due, for example, to a mistyped terminating delimiter) and absorbs part of the later invocation and prevents it from expanding.
+
+If you have several \textbf{syntax} definitions that define different cases of a single conceptual macro, then make sure they are ordered correctly (see Sec.\ \ref{sec:Examples} for examples).
+Remember that macros are tried from most recently defined to earlier, so generally more specific cases should be defined after more general (which is perhaps the opposite of the natural order).
+
+\Subsection{Symptom: Incorrect actual parameters}
+Sometimes the actual parameter substituted for a formal parameter is not what you expect.
+Sometimes it's more then you expected, which can happen if you mistyped the delimiter that was supposed to terminate an actual, and so the actual continued until the next occurrence of the correct delimiter.
+Sometimes the actual parameter is less than you inspected, which can happen if it found the terminatig delimiter within the intended actual, but not within a correct embedded invocation.
+Finally, since actual parameters are evaluated (when not quoted), the substituted parameter might be different from what you expected because it expanded differently than you expected.
+
+\Subsection{Symptom: Non-termination}
+The most obvious cause of non-termination is, of course, a recursive macro.
+If necessary, use the \textbf{\#set message} and \textbf{\#set pause} commands to isolate which macro is causing the problem (Sec.\ \ref{sec:Debugging}).
+Look carefully at the offending macro definition, especially whether the recursive invocation is metaquoted as necessary (otherwise the recursion may be expanding at definition time rather than call time).
+If some invocations of the macro work correctly, look carefully at those that don't, since sometimes an incorrect actual parameter can cause non-termination in a recursive macro
+(think of taking the factorial of a negative number).
+If the offending macro begins with common words or symbols, check for accidental invocations of the macro in comments or other text where you don't intend to invoke it.
+
+\Subsection{Symptom: Repeated side-effects}
+Sometimes it becomes apparent that side-effects of evaluation (including, for example, \textbf{syntax} declarations) are occurring more than once.
+That means that the source text that produces the side-effect is being evaluated more than once.
+This can occur during the normal backtracking process that takes place as the macroprocessor attempts to match the source text against the defined patterns, because backtracking backs over the source and target text, but does not undo side-effects.
+Sometimes this occurs because the macroprocessor is trying to invoke a macro, but the invocation is failing to match any of the patterns.
+To diagnose the problem, try to find out which invocation is being expanded repeatedly by, for example, using \textbf{\#set message}  (Sec.\ \ref{sec:Debugging}).
+\Future{
+Change backtrack so that it undoes \textbf{syntax} definitions (the most common and problematic side-effects).
+This is not too hard to do, since the definitions are stacked.
+}
+
+\Subsection{Symptom: Syntax errors in unexpected places}
+This problem can arise if you use common English words as the initial delimiters in a pattern.
+If you happen to use these words in comments or other source text, the macro processor may try to expand them as macros, generating either syntax error messages or strange target text.
+The solution is to quote or metaquote text that might be recognized as macro calls.
+
+%%%%%%%%%%%%%%%%%
+\Section{Tricks}{Tricks}
+\Subsection{Comments}
+You can define your own comment conventions by defining a macro that expands as an empty string. The first example defines ``//'' through and including the next newline to be a comment,
+and the second defines ``\lstinline+||+'' up to but \emph{not} including the next newline to be a comment:
+\begin{lstlisting}[frame=single]
+syntax // ! 'comment $ means{}endsyntax
+syntax || ! 'comment # means{}endsyntax
+\end{lstlisting}
+Notice that the empty metaquotes are required to have a completely empty macro body. The macro's parameter is unevaluated (\verb+'+) in case the comment text happens to contain any macro invocations. This ensures they are not expanded, which could cause problems if they contain errors (i.e., incorrect invocations), infinite recursion, or side-effects (see Sec.\ \ref{sec:Problems}).
+\Future{
+Treating comments as ordinary macro invocations can have undesirable consequences.
+For example, a short formal parameter expects to match a single expression, but adding a comment to the corresponding actual makes it two expressions (the original actual plus the comment), which the short formal will not match. 
+This can be avoided by using a long formal instead, but this may be undesirable for other reasons.
+The solution might be to build into synmac real comments, which are treated as whitespace, not expressions.
+}
+\Subsection{Suppressing Unwanted Whitespace}
+White space is treated as constant text and passed through the macroprocessor like any other unevaluated text. This tends to preserve formatting from the source text to the target text. However it can also lead to redundant blank lines in the target text. For example, blank lines surrounding macro definitions and newlines after \lstinline"endsyntax", which are useful for readability, will be passed through. A small amount of whitespace can be avoided by defining a comment macro, as described in the previous section, and using it to absorb redundant whitespace and an newline (indicated by ``\$''). For example:
+\begin{lstlisting}[frame=single]
+syntax // 'comment $ means{}endsyntax
+//
+// A macro definition
+//
+syntax some_pattern 
+means its_template endsyntax//
+//
+\end{lstlisting}
+Whitespace is removed automatically from the patterns, so it doesn't need to be commented out between \textbf{syntax} and \textbf{means}.
+ 
+Large blocks of definitions can generate a lot of whitespace, but it is tedious and ugly to comment out each redundant newline, as suggested above.
+Instead, output from any block of text that is executed only for its side-effects (such as a long series of definitions), can be suppressed by embedding it in an invocation of a macro such as this:
+\begin{lstlisting}[frame=single]
+syntax discard begin! &text discard end means{}endsyntax
+\end{lstlisting}
+It is effectively a comment that evaluates its argument for its side-effects.
+For example, an included file that contains only definitions might be structured like this:
+\begin{lstlisting}[frame=single]
+syntax definitions begin! &X definitions end means{}endsyntax
+definitions begin
+  definition 1
+  definition 2
+    ...
+  definition N
+definitions end
+\end{lstlisting}
+Whitespace and any sort of explanatory text can be included around the definitions (so long as it doesn't include troublesome macro invocations!) and it will be discarded.
+
+\Subsection{Using Macros as Variables}
+Since the most recent definition of a macro to match an expression is used, macros can be used as variables.
+For example, the following uses a macro ``\lstinline"_disp_int"'' as a variable, which holds a quantity that has a default value 0 that can be changed by another macro:
+\begin{lstlisting}[frame=single]
+syntax _disp_int means 0 endsyntax
+syntax display interval = ~N $ means
+{syntax {_disp_int} means N endsyntax}
+endsyntax
+\end{lstlisting}
+Note that the name ``\lstinline"_disp_int"'' must be metaquoted in the inner syntax declaration, since otherwise it would be replaced by its current value (some number, presumably), and that value would be used as the pattern.
+On the other hand, the template for ``\lstinline"_disp_int"'' cannot be metaquoted, because we want it to be defined as the value of N, not the word ``N''.
+This is an example where the often optional metaquotes are important to control evaluation time!
+
+\Subsection{Accumulating Lists}
+Macros can be redefined in terms of their previous values in order to accumulate lists and for similar purposes.
+For example, suppose we want to accumulate a list of mentioned variables because we need to do some post processing on them.
+First, initialize an empty list:
+\begin{lstlisting}[frame=single]
+syntax _variables means endsyntax
+\end{lstlisting}
+Then, each time we need to remember another variable name, we add it to the beginning of the list, which we can do with a macro such as this:
+\begin{lstlisting}[frame=single]
+syntax {remember ~name} means {
+syntax {_variables} means name; _variables endsyntax
+}endsyntax
+\end{lstlisting}
+Notice the use of metaquotes in the inner syntax definition, for they are critical.
+In the pattern, the name ``\lstinline"_variables"'' is metaquoted because we do not want it evaluated; we want to redefine ``\lstinline"_variables"'', not the value to which it's bound.
+In the template part of this definition, it is not metaquoted, because we want it to be replaced by its current value (the previous list of variables) before we add the new variable name.
+If in various places I do 
+\begin{lstlisting}[frame=single]
+remember X
+remember Y
+remember Z
+\end{lstlisting}
+then the final value of ``\lstinline"_variables"'' will be ``\lstinline"Z;  Y;  X; "''.
+(There is nothing special here about the use of ``;'' as a delimiter.)
+Notice that the variables are in reverse order, because they are added to the beginning of the \lstinline"_variables" macro.
+If, instead, you need the variables in the order they are mentioned, use these definitions:
+\begin{lstlisting}[frame=single]
+syntax {remember ~name} means {
+syntax {_variables} means _variables name; endsyntax
+}endsyntax
+\end{lstlisting}
+Then \lstinline"_variables" will be ``\lstinline"X;  Y;  Z; "''.
+\Subsection{Processing Lists of Items}
+Once we have a list of things, such as the variable names in the previous example, we may want to apply the same macro to each of them.
+This can be accomplished with macro definitions such as these:
+\begin{lstlisting}[frame=single]
+syntax {handle(~name; &rest)} means { 
+  do something with name
+  handle(rest)} endsyntax
+syntax {handle()} means endsyntax
+syntax {handle everything} means handle(_variables) endsyntax
+handle everything
+\end{lstlisting}
+The use of metaquotes here is somewhat subtle, so we'll go through it in order.
+The second-to-last line defines ``handle everything'' to be the result of evaluating ``\lstinline"handle(_variables)"'', which will be the result of evaluating ``\lstinline"handle(X; Y; Z; )"'' or ``\lstinline"handle(Z; Y; X; )"'' (using our previous examples).
+This will match the first definition of ``handle,'' with short parameter ``name'' bound to the first variable (say, ``X'') and long parameter  ``rest'' bound to, for example, ``Y; Z; ''.
+This will expand as:
+\begin{lstlisting}[frame=single]
+  do something with X
+  handle(Y; Z; )
+\end{lstlisting}
+This invokes ``handle'' recursively to do something with Y and Z, and in the final case ``handle()'' is invoked, which expands as the empty text.
+The last line, the invocation of ``handle everything'', then expands as
+\begin{lstlisting}[frame=single]
+  do something with X
+  do something with Y
+  do something with Z
+\end{lstlisting}
+There are many variations on this structure, but for it to work it is important that the list be substituted before its containing expression (``handle(...)'' in this case) is evaluated, which happens when ``do everything'' is called.
+This is because the macroprocessor parses the invocation before it evaluates its constituent expressions.
+\Subsection{Computed Invocations}
+The previous example illustrates another trick.
+Sometimes we want to compute an entire macro invocation, computing not just the actual parameters, but also the delimiters.
+In the previous example, we computed an invocation of ``handle( ; )'', where the semicolon came from the evaluation of ``\lstinline"handle(_variables)"''.
+The way to do this is to define an auxiliary macro whose template is the computed invocation (and hence not metaquoted).
+Evaluating the auxiliary macro then evaluates the computed invocation:
+\begin{lstlisting}[frame=single]
+syntax _aux means expression to compute invocation endsyntax
+_aux
+\end{lstlisting}
+
+%%%%%%%%%%%%%%%%%
+\Section{Pragmatic Control}{Pragmatic Control}
+All of the following pragmatic controls are processed as intrinsic (built-in) macros; therefore their argument (which extends to the newline) is evaluated in the usual way.
+\Subsection{Including Files}
+It is often useful to include some or all of the source text from a separate file, for example, the separate file may provide the macro definitions used in the main file.
+The command
+\begin{lstlisting}[frame=single,mathescape]
+#include $\nterm{filename}$
+\end{lstlisting}
+will include the source text from the source file at this point in the current file.
+Included files can include other files to any depth.
+The argument to \#include can be any expression that returns a token, but string literals are most common.
+Lexical parameters set in a file (Sec.\ \ref{sec:Lexical Commands}) are local to that file.
+\Subsection{Trimming Expression Sequences}
+Both long and unevaluated parameters match all of the text between their bounding delimiters, including leading and trailing whitespace.
+(Short parameters do not include leading or trailing whitespace.)
+Sometimes this leading or trailing whitespace is undesirable, for example when we want to concatenate with other text without any intervening whitespace.
+To handle such situations, synmac provides an intrinsic \emph{trim} operation that removes leading and trailing whitespece for its (evaluated) argument.
+The expression
+\begin{lstlisting}[frame=single,mathescape]
+#trim $\nterm{expr seq}$ endtrim
+\end{lstlisting}
+evaluates its argument $\nterm{expr seq}$ in the normal way, and then trims off any leading or trailing whitespace.
+For example, this macro:
+\begin{lstlisting}[frame=single,mathescape]
+syntax define &axis bounds means {
+  lower#trim axis endtrim{}bound = 0;
+  upper#trim axis endtrim""bound = 100;
+}endsyntax
+
+define X /*ordinate*/ bounds
+define Y /*abscissa*/ bounds
+\end{lstlisting}
+generates
+\begin{lstlisting}[frame=single,mathescape]
+  lowerXbound = 0;
+  upperXbound = 100;
+  lowerYbound = 0;
+  upperYbound = 100;
+\end{lstlisting}
+The macro also illustrates two different ways to separate alphanumeric words.
+\Subsection{Setting Parameters}
+\label{sec:setting-parameters}
+\Subsubsection{Definition Keywords}
+The keywords used for defining syntax macros can be redefined. The default command for defining a macro has the form:
+\begin{lstlisting}[frame=single,mathescape]
+syntax $\nterm{pattern}$ means $\nterm{template}$ endsyntax
+\end{lstlisting}
+Entering, for example, the command:
+\begin{lstlisting}[frame=single]
+#set syntax def as ;
+\end{lstlisting}
+will change the definition syntax to:
+\begin{lstlisting}[frame=single,mathescape]
+def $\nterm{pattern}$ as $\nterm{template}$;
+\end{lstlisting}
+Similarly, the default syntax for declaring constant macros (patterns) is:
+\begin{lstlisting}[frame=single,mathescape]
+pattern $\nterm{pattern}$ endpattern
+\end{lstlisting}
+Entering, for example, the command:
+\begin{lstlisting}[frame=single]
+#set pattern declare $
+\end{lstlisting}
+will change the pattern declaration syntax to:
+\def\dollar{\mbox{\$}}
+\begin{lstlisting}[frame=single,mathescape]
+declare $\nterm{pattern}\ \dollar$
+\end{lstlisting}
+See the examples in Secs.\ \ref{sec:Peano Arithmetic} and \ref{sec:Simple LISP} to see alternative definition syntax in use.
+\Subsubsection{Parameter Flags}
+The token that represents the long parameter flag in patterns can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set long $\nterm{token}$
+\end{lstlisting}
+The token that represents the short parameter flag in patterns can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set short $\nterm{token}$
+\end{lstlisting}
+The token that represents the unevaluated parameter flag in patterns can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set uneval $\nterm{token}$
+\end{lstlisting}
+In all of these cases the $\nterm{token}$ can be a word or a special character.
+This will not affect macros already defined.
+\Subsubsection{Newline, Endline, and Dedent Pattern Elements}
+The token that represents a newline delimiter in patterns can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set newline $\nterm{token}$
+\end{lstlisting}
+The $\nterm{token}$ can be a word or a special character.
+For example, the following changes the newline delimiter from the default ``\$'' to ``nl'':
+\begin{lstlisting}[frame=single]
+#set newline nl
+\end{lstlisting}
+This will not affect macros already defined.
+The token that represents a dedent delimiter in patterns can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set $\mbox{dedent}$ $\nterm{token}$
+\end{lstlisting}
+
+Similarly the token that represents a endline delimiter --- that is, an end-of-line that is not consumed (Sec.\ \ref{sec:newline-delimiters}) --- in patterns (by default ``\#'') can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set endline $\nterm{token}$
+\end{lstlisting}
+The $\nterm{token}$ can be a word or a special character.
+This will not affect macros already defined.
+\Subsubsection{Commit Pattern Element}
+The token that represents the commit flag in patterns can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set commit $\nterm{token}$
+\end{lstlisting}
+The $\nterm{token}$ can be a word or a special character.
+This will not affect macros already defined.
+\Subsubsection{Metaquotes}
+The metaquotes (by default \lstinline"{}") can be changed by this command:
+\begin{lstlisting}[frame=single,mathescape]
+#set metaquotes $\nterm{token}$ $\nterm{token}$
+\end{lstlisting}
+This sets the $\nterm{token}$s (words or special characters) as the open and close metaquotes, respectively.
+For example,
+\begin{lstlisting}[frame=single]
+#set metaquotes delay enddelay
+#set metaquotes < >
+\end{lstlisting}
+sets the metaquotes as indicated.
+\Subsubsection{Command flag}
+The token that represents the command flag (by default ``\#'') can be set by
+\begin{lstlisting}[frame=single,mathescape]
+#set command $\nterm{token}$
+\end{lstlisting}
+The $\nterm{token}$ can be a word or a special character.
+\Subsection{Lexical Commands}
+Lexical commands are indicated by a flag character (by default, the back slash, \verb+\+) immediately after a newline. (Note that this implies that it cannot be the first character in a file.) These changes stay in effect in a file until and unless they are changed by another lexical command. Whitespace can come between the command and its argument string.
+The arguments of lexical commands are not evaluated, so they are always string literals.
+\Subsubsection{Alpha characters}
+Sets the characters that, in addition to digits and upper and lower case letters, will be considered alphanumeric for the purpose of parsing tokens. For example, the following allows underscores in words:
+\begin{lstlisting}[frame=single]
+\alpha "_"
+\end{lstlisting}
+The command resets the set of allowed extra characters, which can be set to none by setting to the empty string.
+\Subsubsection{Quotes}
+Sets the open and close string quotes (by default \lstinline!""!). If two characters are provided, they become the open and close quotes; of one is provided, it becomes both. This changes the quotes to asymmetric single quotes:
+\begin{lstlisting}[frame=single]
+\quotes "`'"
+\end{lstlisting}
+This sets the quotes back to the default double quotes:
+\begin{lstlisting}[frame=single]
+\quotes `"'
+\end{lstlisting}
+\Subsubsection{Superquote}
+Sets the superquote character (backslash by default) for including quotes in strings. This sets the superquote to percent:
+\begin{lstlisting}[frame=single]
+\superquote "%"
+\end{lstlisting}
+\Subsubsection{Flag}
+Sets the flag character for lexical commands. For example, this changes it from the default backslash to \$:
+\begin{lstlisting}[frame=single]
+\flag "$"
+\end{lstlisting}
+\Subsection{Debugging}
+The synmac program provides a number of debugging commands, which may be useful in diagnosing problems with macro definitions.
+\Subsubsection{Definition Dump}
+To turn on definition dumping enter the text:
+\begin{lstlisting}[frame=single]
+#set definitions on
+\end{lstlisting}
+which will cause all subsequent macro definitions to print all the current definitions (user defined and intrinsic).
+They are printed in an internal format, but should be clear enough.
+By looking at these you may discover that a macro is undefined or defined differently than you intended.
+Definitions are printed using the current tokens representing the newline delimiter, commit flag, and long and short parameter characters.
+Definition dumping is turned off by setting it to anything but ``on''.
+\Subsubsection{Pause}
+Sometimes it is difficult to understand where in the source text a problem has occurred.
+The command
+\begin{lstlisting}[frame=single,mathescape]
+#set pause $\nterm{string}$
+\end{lstlisting}
+will print a message (the $\nterm{string}$) each time the macroprocessor encounters it and wait for you to enter something before continuing.
+\Subsubsection{Message}
+Sometimes it is difficult to tell where in the source text some problem is occurring.
+This can happen, for example, in long sequences of macro definitions that generate little if any target text.
+\begin{lstlisting}[frame=single,mathescape]
+#set message $\nterm{string}$
+\end{lstlisting}
+The message text (a $\nterm{string}$) is printed each time the macroprocessor encounters it.
+\Subsubsection{Backtrack warning}
+Sometimes errors in macro definitions or invocations manifest themselves by the macroprocessor scanning and backtracking across large regions of the source text.
+Backtracking may be constrained by entering the command:
+\begin{lstlisting}[frame=single,mathescape]
+#set backtrack $\nterm{number}$
+\end{lstlisting}
+where $\nterm{number}$ is any number. 
+Any attempt to backtrack over more than $\nterm{number}$ tokens will trigger an informative diagnostic, which may help in identifying the problem.
+\Subsubsection{Tracing}
+This command is intended primarily for use by developers.
+\begin{lstlisting}[frame=single,mathescape]
+#set trace $\nterm{word}$
+\end{lstlisting}
+This causes the macroprocessor to print out trace information while it is running, some of which may be voluminous.
+The $\nterm{word}$ may be an number, which sets the trace level to that number. 
+Currently defined trace levels are 1 to 4.
+Higher levels produce more output and include the trace output at lower levels.
+The $\nterm{word}$ can also be certain specific words to generate trace output about that topic.
+Currently defined topics (which correspond to internal procedures) are 
+``evalexpr'', ``tryrule'', ``tryapply'', and ``match''.
+Setting the trace level to ``0'' turns tracing off.
+\Future{
+Most of these tracing options will be eliminated eventually, except those useful for users.
+}
+\Section{Running}{Running Synmac}
+The current implementation of synmac is a python program that reads the source text from standard input and writes the target text on standard output.
+Diagnostics and debugging information go to the standard error file.
+It can be run interactively and the source text is terminated by the end-of-file or the word ``eof''.
+More commonly, synmac is used non-interactively to generate a target file from a source file, e.g.:
+\begin{verbatim}
+% synmac.py <source.smac >target
+\end{verbatim}
+(We are using the extension ``.smac'' for synmac source text.)
+\Future{
+For the most part, synmac processes utf-8 unicode files correctly. Should it have a utf-16 option?
+}
+%%%%%%%%%%
+%\newpage
+\bibliographystyle{IEEEtran}
+\bibliography{BJM2018}
+%%%%%%%%%%%%
+\newpage
+\appendix
+\Section{grammar}{Synmac Grammar}
+Because the essence of a syntax macro language is to have a variable syntax, it is difficult to write a grammar that is both informative and formally accurate.
+This grammar aims at being informative for users, with some sacrifice of accuracy.
+The grammatical notation is as follows:
+curly braces surround alternatives and group items;
+square brackets surround optional items; 
+superscript * means zero or more repetitions;
+superscript + means one or more repetitions.
+\begin{eqnarray*}
+\nterm{expr seq} &::=& [\nterm{whitespace}]\ [\ \nterm{expr} [\nterm{whitespace}]\ ]^*\\
+\nterm{expr} &::=& \left\{ \begin{array}{l}
+    \nterm{invocation} \\
+    \nterm{string} \\
+    \obrace \nterm{expr seq} \cbrace \\
+    \nterm{token}
+  \end{array} \right\}\\
+\nterm{invocation} &::=& \nterm{user macro}\ |\  \nterm{intrinsic macro}\\
+\nterm{user macro} &::=& \nterm{delim}^+\ [\nterm{actual} \nterm{delim}^+]^*\ [\nterm{expr}]\\
+\nterm{actual} &::=& \nterm{expr}\ |\ \nterm{expr seq}\\
+\nterm{intrinsic macro} &::=& \left\{ \begin{array}{l}
+    \nterm{definition} \\
+    \#\word{include}\ \nterm{expr seq}\nl\\
+    \#\word{trim}\ \nterm{expr seq}\ \word{endtrim}\\
+    \#\word{set}\ \nterm{parameter setting}\nl\\
+    \#\word{endline}\\
+    \nl\verb+\+\nterm{lexical command}\ \nterm{string}
+  \end{array} \right\}\\
+%\nterm{definition} &::=& \word{syntax}\ \nterm{pattern}\ [\word{means}\ \nterm{template}]\ \word{endsyntax}\\
+\nterm{definition} &::=& \Alt
+    \word{syntax}\ \nterm{pattern}\ \word{means}\ \nterm{template}\ \word{endsyntax}\\
+    \word{pattern}\ \nterm{pattern}\ \word{endpattern}
+  \Endalt\\
+\nterm{pattern} &::=& \nterm{delim}^+\ [\nterm{param} \nterm{delim}^+]^*\ [\nterm{short\ param}]\\\nterm{param} &::=& \nterm{short\ param}\ |\ \nterm{long\ param}\ |\ \nterm{uneval\ param}\\
+\nterm{short\ param} &::=& \Tilde\nterm{word} \\
+\nterm{long\ param} &::=& \&\nterm{word} \\
+\nterm{uneval\ param} &::=& \mbox{'}\nterm{word}\\
+\nterm{template} &::=& \nterm{expr seq}\\
+\nterm{delim} &::=& \{\ \nterm{token}\ |\ \$\ |\ \mbox{\#}\ |\ \word{dedent}\ \}\ [\;!\;]\\
+\nterm{text} &::=& \nterm{token}\ |\ \nterm{string}\\
+\nterm{token} &::=& \nterm{word}\ |\ \nterm{special character}\\
+\nterm{word} &::=& \nterm{alphanumeric}^+\\
+\nterm{string} &::=& \verb+"+\ \{\ \nterm{nonquote char}\ |\ \verb+\+\nterm{char}\ \}^*\ \verb+"+\\
+\nterm{lexical command} &::=& \word{alpha}\ |\ \word{flag}\ |\ \word{quotes}\ |\ \word{superquote}\\
+\nterm{param setting} &::=& \left\{ \begin{array}{l}
+    \word{alpha}\ \nterm{string}\\
+    \word{backtrack}\ \nterm{text}\\
+    \word{command}\ \nterm{token}\\
+    \word{commit}\ \nterm{token}\\
+    \word{dedent}\ \nterm{token}\\
+    \word{definitions}\ \nterm{text}\\
+    \word{endline}\ \nterm{token}\\
+    \word{long}\ \nterm{token}\\
+    \word{message}\ \nterm{text}\\
+    \word{metaquotes}\ \nterm{token}\ \nterm{token}\\
+    \word{newline}\ \nterm{token}\\
+    \word{pattern}\ \nterm{delim}\ \nterm{delim}\\
+    \word{pause}\ \nterm{text}\\
+    \word{short}\ \nterm{token}\\
+    \word{syntax}\ \nterm{delim}\ \nterm{delim}\ \nterm{delim}\\
+    \word{trace}\ \nterm{text}\\
+    \word{uneval}\ \nterm{token}
+  \end{array} \right\}
+\end{eqnarray*}
+\end{document}
