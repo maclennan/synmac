@@ -1,2 +1,2 @@
 # synmac
-syntax macroprocessor
+A syntax macroprocessor permits parameterized text substitutions with greater syntactic flexibility than allowed with ordinary macroprocessors. This repository is for the synmac syntax macroprocessor, which permits arbitrarily delimited macro invocations, and thus allows the definition of new statement and expression forms or even complete languages. Synmac is also a computationally complete programming language.
