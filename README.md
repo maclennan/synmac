@@ -1,0 +1,2 @@
+# synmac
+syntax macroprocessor
